@@ -1,6 +1,18 @@
 /*
- * Unit tests for Bitcoin address encoding
+ * Unit tests for DigiByte address encoding
  * Tests Base58 and Bech32 decoding through address_to_txn()
+ *
+ * DGB address formats:
+ *   P2PKH mainnet:  'D...'   version byte 0x1E (30)
+ *   P2SH  mainnet:  'S...'   version byte 0x3F (63)
+ *   P2WPKH mainnet: 'dgb1q...'   bech32, HRP "dgb"
+ *   P2WPKH testnet: 'dgbt1q...'  bech32, HRP "dgbt"
+ *   P2WPKH regtest: 'dgbrt1q...' bech32, HRP "dgbrt"
+ *
+ * Note: address_to_txn() does not validate the address via RPC; it only
+ * decodes the encoding (Base58 or bech32) and builds the output script.
+ * Full address validation happens via digibyted validateaddress RPC in
+ * bitcoin.c:validate_address().
  */
 
 /* config.h must be first to define _GNU_SOURCE before system headers */
@@ -14,188 +26,174 @@
 #include "../test_common.h"
 #include "libckpool.h"
 
-/* Test address_to_txn with legacy P2PKH address (starts with '1')
- * These are Base58 encoded addresses
- * Note: Full address validation requires bitcoind, so we test that the
- * function processes addresses without crashing and produces expected lengths
+/*
+ * P2PKH output script template (25 bytes):
+ *   OP_DUP OP_HASH160 OP_PUSH20 <hash160[20]> OP_EQUALVERIFY OP_CHECKSIG
+ *   0x76   0xa9       0x14                     0x88            0xac
+ *
+ * address_to_txn with script=false,segwit=false calls address_to_pubkeytxn()
+ * which decodes the Base58Check address via b58tobin() and constructs this
+ * script, placing b58bin[1..20] as the hash160 (skipping the version byte).
+ * The version byte (0x1E for DGB mainnet) is NOT written into the script.
  */
-static void test_legacy_p2pkh_address(void)
+static void test_p2pkh_script_opcodes(void)
 {
-    char txn[100];
-    int len;
-    
-    /* Test with a known valid P2PKH address format */
-    const char *test_addr = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"; // Genesis block address
-    
-    /* Test P2PKH (script=false, segwit=false) */
-    len = address_to_txn(txn, test_addr, false, false);
-    
-    /* P2PKH transaction should be 25 bytes
-     * We verify the length matches expected structure, but don't validate
-     * exact byte values as Base58 decoding may vary
-     */
-    assert_true(len == 25);
-    
-    /* Verify function doesn't crash and produces output */
-    assert_true(len > 0);
-    assert_true(len <= 100); // Reasonable size limit
+	char txn[100];
+	int len;
+
+	/* Use a valid-format Base58Check address. b58tobin is coin-agnostic;
+	 * the version byte (0x00 for this BTC address) is stripped and the
+	 * remaining 20 bytes become the hash160. The opcode template is the
+	 * same for all P2PKH addresses regardless of coin. */
+	const char *addr = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa";
+	len = address_to_txn(txn, addr, false, false);
+
+	assert_true(len == 25);
+
+	/* Verify the P2PKH script template byte-by-byte */
+	assert_true((unsigned char)txn[0] == 0x76); /* OP_DUP */
+	assert_true((unsigned char)txn[1] == 0xa9); /* OP_HASH160 */
+	assert_true((unsigned char)txn[2] == 0x14); /* push 20 bytes */
+	assert_true((unsigned char)txn[23] == 0x88); /* OP_EQUALVERIFY */
+	assert_true((unsigned char)txn[24] == 0xac); /* OP_CHECKSIG */
 }
 
-/* Test address_to_txn with P2SH address (starts with '3')
- * These are Base58 encoded script addresses
+/*
+ * P2SH output script template (23 bytes):
+ *   OP_HASH160 OP_PUSH20 <hash160[20]> OP_EQUAL
+ *   0xa9       0x14                    0x87
+ *
+ * DGB P2SH mainnet addresses start with 'S' (version byte 0x3F).
  */
-static void test_p2sh_address(void)
+static void test_p2sh_script_opcodes(void)
 {
-    char txn[100];
-    int len;
-    
-    /* Test with a known valid P2SH address format */
-    const char *test_addr = "3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy"; // Example P2SH format
-    
-    /* Test P2SH (script=true, segwit=false) */
-    len = address_to_txn(txn, test_addr, true, false);
-    
-    /* P2SH transaction should be 23 bytes
-     * We verify the length matches expected structure
-     */
-    assert_true(len == 23);
-    assert_true(len > 0);
+	char txn[100];
+	int len;
+
+	const char *addr = "3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy";
+	len = address_to_txn(txn, addr, true, false);
+
+	assert_true(len == 23);
+
+	/* Verify the P2SH script template byte-by-byte */
+	assert_true((unsigned char)txn[0] == 0xa9); /* OP_HASH160 */
+	assert_true((unsigned char)txn[1] == 0x14); /* push 20 bytes */
+	assert_true((unsigned char)txn[22] == 0x87); /* OP_EQUAL */
 }
 
-/* Test address_to_txn with Segwit Bech32 address (starts with 'bc1')
- * These are Bech32 encoded addresses
+/*
+ * DGB bech32 P2WPKH addresses (version 0, 20-byte witness program).
+ *
+ * Output script (22 bytes):
+ *   witness_version  push_len  <witness_program[20]>
+ *   0x00             0x14
+ *
+ * bech32_decode() in libckpool.c is HRP-agnostic: it finds the last '1'
+ * separator and never checks the HRP string. So "dgb1q...", "dgbt1q...",
+ * and "dgbrt1q..." all decode identically to the same output script given
+ * the same witness program bytes.
+ *
+ * Test addresses are the hardcoded donation addresses from ckpool.c:
+ *   mainnet  dgb1q6tf0myda7plmpksdqc8k4tf8q957z0fm0y9a5m
+ *   testnet  dgbt1qysts53eu2y6et25a8ap7lr03muyw2czk3sezhx
+ *   regtest  dgbrt1q73s4v2mgt9mmcd5kum3d2jzvfuy297are8yv7l
  */
-static void test_segwit_bech32_address(void)
+static void test_dgb_bech32_mainnet_p2wpkh(void)
 {
-    char txn[100];
-    int len;
-    
-    /* Test with a known valid Bech32 address format */
-    const char *test_addr = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"; // Example Bech32
-    
-    /* Test Segwit (script=false, segwit=true) */
-    len = address_to_txn(txn, test_addr, false, true);
-    
-    /* Segwit transaction format:
-     * First byte: witness version (0x00 for version 0, or 0x50+version for version > 0)
-     * Second byte: witness program length
-     * Followed by witness program data
-     */
-    assert_true(len > 0);
-    assert_true(len <= 100); // Reasonable size limit
-    
-    /* Version 0 segwit addresses should have version byte 0x00 */
-    /* Note: This may vary based on the actual address, but structure should be valid */
+	char txn[100];
+	int len;
+
+	/* Mainnet donation address (HRP "dgb") */
+	const char *addr = "dgb1q6tf0myda7plmpksdqc8k4tf8q957z0fm0y9a5m";
+	len = address_to_txn(txn, addr, false, true);
+
+	/* P2WPKH: 2 header bytes + 20 witness bytes = 22 */
+	assert_true(len == 22);
+	assert_true((unsigned char)txn[0] == 0x00); /* witness version 0 */
+	assert_true((unsigned char)txn[1] == 0x14); /* push 20 bytes */
 }
 
-/* Test that address_to_txn handles different address types correctly */
+static void test_dgb_bech32_testnet_p2wpkh(void)
+{
+	char txn[100];
+	int len;
+
+	/* Testnet donation address (HRP "dgbt") */
+	const char *addr = "dgbt1qysts53eu2y6et25a8ap7lr03muyw2czk3sezhx";
+	len = address_to_txn(txn, addr, false, true);
+
+	assert_true(len == 22);
+	assert_true((unsigned char)txn[0] == 0x00); /* witness version 0 */
+	assert_true((unsigned char)txn[1] == 0x14); /* push 20 bytes */
+}
+
+static void test_dgb_bech32_regtest_p2wpkh(void)
+{
+	char txn[100];
+	int len;
+
+	/* Regtest donation address (HRP "dgbrt") */
+	const char *addr = "dgbrt1q73s4v2mgt9mmcd5kum3d2jzvfuy297are8yv7l";
+	len = address_to_txn(txn, addr, false, true);
+
+	assert_true(len == 22);
+	assert_true((unsigned char)txn[0] == 0x00); /* witness version 0 */
+	assert_true((unsigned char)txn[1] == 0x14); /* push 20 bytes */
+}
+
+/*
+ * The three DGB bech32 donation addresses (mainnet/testnet/regtest) each
+ * encode a different 20-byte witness program, so their output scripts must
+ * differ in bytes 2..21 even though the header bytes are the same.
+ */
+static void test_dgb_bech32_addresses_differ(void)
+{
+	char txn_main[100], txn_test[100], txn_regt[100];
+	int len_main, len_test, len_regt;
+
+	len_main = address_to_txn(txn_main, "dgb1q6tf0myda7plmpksdqc8k4tf8q957z0fm0y9a5m",  false, true);
+	len_test = address_to_txn(txn_test, "dgbt1qysts53eu2y6et25a8ap7lr03muyw2czk3sezhx",  false, true);
+	len_regt = address_to_txn(txn_regt, "dgbrt1q73s4v2mgt9mmcd5kum3d2jzvfuy297are8yv7l", false, true);
+
+	assert_true(len_main == 22);
+	assert_true(len_test == 22);
+	assert_true(len_regt == 22);
+
+	/* Witness programs (bytes 2..21) must all be distinct */
+	assert_true(memcmp(txn_main + 2, txn_test + 2, 20) != 0);
+	assert_true(memcmp(txn_main + 2, txn_regt + 2, 20) != 0);
+	assert_true(memcmp(txn_test + 2, txn_regt + 2, 20) != 0);
+}
+
+/*
+ * address_to_txn() routing: same input, different flags → different outputs.
+ */
 static void test_address_type_routing(void)
 {
-    char txn[100];
-    int len_p2pkh, len_p2sh, len_segwit;
-    const char *test_addr = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa";
-    
-    /* Test that different flags produce different transaction formats
-     * Note: Using the same address with different flags tests the routing logic,
-     * though the actual decoding may vary based on address type
-     */
-    len_p2pkh = address_to_txn(txn, test_addr, false, false);
-    
-    /* P2PKH should be 25 bytes */
-    assert_true(len_p2pkh == 25);
-    
-    /* P2SH should be 23 bytes (using same address tests routing, not validity) */
-    len_p2sh = address_to_txn(txn, test_addr, true, false);
-    assert_true(len_p2sh == 23);
-    
-    /* Segwit with non-Bech32 address may produce unexpected results,
-     * but function should not crash
-     */
-    len_segwit = address_to_txn(txn, test_addr, false, true);
-    assert_true(len_segwit > 0);
-}
+	char txn[100];
+	int len_p2pkh, len_p2sh;
+	const char *addr = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa";
 
-/* Test Base58 decoding through b58tobin (indirectly via address_to_txn)
- * Base58 uses characters: 123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz
- * We test that the function processes Base58 addresses and produces expected lengths
- */
-static void test_base58_encoding_structure(void)
-{
-    char txn[100];
-    int len;
-    
-    /* Test that Base58 addresses produce expected transaction structure */
-    const char *test_addr = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa";
-    
-    len = address_to_txn(txn, test_addr, false, false);
-    
-    /* Verify the transaction length is correct for P2PKH
-     * Full structure validation would require verifying exact opcodes,
-     * but that depends on successful Base58 decoding which may vary
-     */
-    assert_true(len == 25);
-    assert_true(len > 0);
-}
+	len_p2pkh = address_to_txn(txn, addr, false, false);
+	assert_true(len_p2pkh == 25);
 
-/* Test that address functions handle various address formats */
-static void test_address_format_handling(void)
-{
-    char txn[100];
-    int len;
-    
-    /* Test different address formats that should be handled */
-    
-    /* Legacy address (P2PKH) */
-    const char *legacy = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa";
-    len = address_to_txn(txn, legacy, false, false);
-    assert_true(len == 25);
-    
-    /* Script address (P2SH) */
-    const char *script = "3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy";
-    len = address_to_txn(txn, script, true, false);
-    assert_true(len == 23);
-    
-    /* Bech32 address (Segwit) */
-    const char *bech32 = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4";
-    len = address_to_txn(txn, bech32, false, true);
-    assert_true(len > 0);
-}
-
-/* Test edge cases - very long addresses, special characters, etc.
- * Note: These tests verify the functions don't crash, not that they produce valid output
- */
-static void test_address_edge_cases(void)
-{
-    char txn[100];
-    int len;
-    
-    /* Test with various address-like strings
-     * Note: Without full validation, we're just testing the functions don't crash
-     */
-    
-    /* Standard length address */
-    const char *normal = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa";
-    len = address_to_txn(txn, normal, false, false);
-    assert_true(len > 0);
-    
-    /* The functions should handle the input without crashing
-     * Full validation would require bitcoind integration
-     */
+	len_p2sh = address_to_txn(txn, addr, true, false);
+	assert_true(len_p2sh == 23);
 }
 
 int main(void)
 {
-    printf("Running address encoding tests...\n\n");
-    
-    run_test(test_legacy_p2pkh_address);
-    run_test(test_p2sh_address);
-    run_test(test_segwit_bech32_address);
-    run_test(test_address_type_routing);
-    run_test(test_base58_encoding_structure);
-    run_test(test_address_format_handling);
-    run_test(test_address_edge_cases);
-    
-    printf("\nAll address encoding tests passed!\n");
-    return 0;
+	printf("Running DigiByte address encoding tests...\n\n");
+
+	run_test(test_p2pkh_script_opcodes);
+	run_test(test_p2sh_script_opcodes);
+	run_test(test_dgb_bech32_mainnet_p2wpkh);
+	run_test(test_dgb_bech32_testnet_p2wpkh);
+	run_test(test_dgb_bech32_regtest_p2wpkh);
+	run_test(test_dgb_bech32_addresses_differ);
+	run_test(test_address_type_routing);
+
+	printf("\nAll DigiByte address encoding tests passed!\n");
+	return 0;
 }
 

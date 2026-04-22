@@ -750,7 +750,7 @@ static const char *rpc_method(const char *rpc_req)
 	return rpc_req;
 }
 
-/* All of these calls are made to bitcoind which prefers open/close instead
+/* All of these calls are made to digibyted which prefers open/close instead
  * of persistent connections so cs->fd is always invalid. */
 static json_t *_json_rpc_call(connsock_t *cs, const char *rpc_req, const bool info_only)
 {
@@ -1501,7 +1501,7 @@ static void parse_config(ckpool_t *ckp)
 	if (vmask && strlen(vmask) && validhex(vmask))
 		sscanf(vmask, "%x", &ckp->version_mask);
 	else
-		ckp->version_mask = 0x1fffe000;
+		ckp->version_mask = 0x1fffe000; /* DGB algo in bits 9-11 (0xe00); mask avoids them */
 	/* Default don't drop idle clients */
 	json_get_int(&ckp->dropidle, json_conf, "dropidle");
 	/* Look for an array first and then a single entry */
@@ -1754,7 +1754,7 @@ int main(int argc, char **argv)
 		else if (ckp.proxy)
 			ckp.name = "ckproxy";
 		else
-			ckp.name = "ckpool";
+			ckp.name = "ckpool-lhr-dgb";
 	}
 	snprintf(buf, 15, "%s", ckp.name);
 	prctl(PR_SET_NAME, buf, 0, 0, 0);
@@ -1798,27 +1798,26 @@ int main(int argc, char **argv)
 	}
 	for (i = 0; i < ckp.btcds; i++) {
 		if (!ckp.btcdurl[i])
-			ckp.btcdurl[i] = strdup("localhost:8332");
+			ckp.btcdurl[i] = strdup("localhost:14022");
 		if (!ckp.btcdauth[i])
 			ckp.btcdauth[i] = strdup("user");
 		if (!ckp.btcdpass[i])
 			ckp.btcdpass[i] = strdup("pass");
 	}
 	if (!ckp.donaddress)
-		ckp.donaddress = "bc1q8qkesw5kyplv7hdxyseqls5m78w5tqdfd40lf5";
+		ckp.donaddress = "dgb1q6tf0myda7plmpksdqc8k4tf8q957z0fm0y9a5m";
 	if (ckp.donation < 0.1)
 		ckp.donation = 0;
 	else if (ckp.donation > 99.9)
 		ckp.donation = 99.9;
-	/* Donations on testnet are meaningless but required for complete
-	 * testing. Testnet and regtest addresses */
-	ckp.tndonaddress = "tb1q5fyv7tue73y4zxezh2c685qpwx0cfngfxlrgxh";
-	ckp.rtdonaddress = "bcrt1qlk935ze2fsu86zjp395uvtegztrkaezawxx0wf";
+	/* Testnet and regtest donation addresses */
+	ckp.tndonaddress = "dgbt1qysts53eu2y6et25a8ap7lr03muyw2czk3sezhx";
+	ckp.rtdonaddress = "dgbrt1q73s4v2mgt9mmcd5kum3d2jzvfuy297are8yv7l";
 
 	if (!ckp.btcaddress && !ckp.btcsolo && !ckp.proxy)
-		quit(0, "Non-solo mining must have a btcaddress in config, aborting!");
+		quit(0, "Non-solo mining must have a dgbaddress in config, aborting!");
 	if (!ckp.blockpoll)
-		ckp.blockpoll = 100;
+		ckp.blockpoll = 1000; /* DGB has 15s blocks; poll faster than BTC default */
 	if (!ckp.nonce1length)
 		ckp.nonce1length = 4;
 	else if (ckp.nonce1length < 2 || ckp.nonce1length > 8)
@@ -1830,7 +1829,7 @@ int main(int argc, char **argv)
 	} else if (ckp.nonce2length < 2 || ckp.nonce2length > 8)
 		quit(0, "Invalid nonce2length %d specified, must be 2~8", ckp.nonce2length);
 	if (!ckp.update_interval)
-		ckp.update_interval = 30;
+		ckp.update_interval = 10; /* DGB has 15s blocks; update more frequently */
 
 	/* Validate mindiff is sane */
 	if (!validate_mindiff(&ckp.mindiff))

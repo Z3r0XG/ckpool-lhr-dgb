@@ -32,13 +32,17 @@ This directory contains unit tests for CKPOOL-LHR.
 26. **test-persistent-ua-tracking.c** - Persistent UA tracking
 27. **test-zombie-cleanup.c** - Zombie/ghost cleanup and refcount invariants (fork feature)
 28. **test-auth-rejection.c** - Share rejection during auth window
+29. **test-logmsg.c** - LOGMSGSIZ chunking correctness (long message delivery)
 
 ## Building and Running Tests
 
 ### Prerequisites
 
-> [!NOTE]
-> Tests use a simple built-in test framework (no external dependencies required).
+Install the cmocka unit testing library:
+
+```bash
+sudo apt-get install libcmocka-dev
+```
 
 ### Build and Run
 

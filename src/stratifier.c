@@ -427,8 +427,8 @@ static void generate_coinbase(ckpool_t *ckp, workbase_t *wb)
 	len += wb->enonce2varlen;
 
 	wb->coinb2bin = ckzalloc(512);
-	memcpy(wb->coinb2bin, "\x0a\x63\x6b\x70\x6f\x6f\x6c\x2d\x6c\x68\x72", 11);
-	wb->coinb2len = 11;
+	memcpy(wb->coinb2bin, "\x0e\x63\x6b\x70\x6f\x6f\x6c\x2d\x6c\x68\x72\x2d\x64\x67\x62", 15);
+	wb->coinb2len = 15;
 	if (ckp->btcsig) {
 		int siglen = strlen(ckp->btcsig);
 
@@ -576,7 +576,7 @@ static void generate_coinbase(ckpool_t *ckp, workbase_t *wb)
 		}
 		free(cb);
 		ckp->coinbase_valid = true;
-		LOGWARNING("Mining solo to any incoming valid BTC address username");
+		LOGWARNING("Mining solo to any incoming valid DGB address username");
 		if (ckp->donation)
 			LOGWARNING("%.1f percent donation to %s", ckp->donation, ckp->donaddress);
 	}
@@ -977,7 +977,7 @@ static void broadcast_ping(sdata_t *sdata);
 #define REFCOUNT_LOCAL		10
 #define REFCOUNT_RETURNED	5
 
-/* Submit the transactions in node/remote mode so the local btcd has all the
+/* Submit the transactions in node/remote mode so the local digibyted has all the
  * transactions that will go into the next blocksolve. */
 static void submit_transaction(ckpool_t *ckp, const char *hash)
 {
@@ -1370,7 +1370,7 @@ retry:
 		gbt_witness_data(wb, txn_array);
 		// Verify against the pre-calculated value if it exists. Skip the size/OP_RETURN bytes.
 		if (wb->insert_witness && safecmp(witnessdata_check + 4, wb->witnessdata) != 0)
-			LOGERR("Witness from btcd: %s. Calculated Witness: %s", witnessdata_check + 4, wb->witnessdata);
+			LOGERR("Witness from digibyted: %s. Calculated Witness: %s", witnessdata_check + 4, wb->witnessdata);
 	}
 
 	generate_coinbase(ckp, wb);
@@ -1399,7 +1399,7 @@ out:
 	cksem_post(&sdata->update_sem);
 
 	/* Send a ping to miners if we fail to get a base to keep them
-	 * connected while bitcoind recovers(?) */
+	 * connected while digibyted recovers(?) */
 	if (unlikely(!ret)) {
 		LOGINFO("Broadcast ping due to failed stratum base update");
 		broadcast_ping(sdata);
@@ -7772,7 +7772,7 @@ static void parse_instance_msg(ckpool_t *ckp, sdata_t *sdata, smsg_t *msg, strat
 	while (unlikely(!ckp->proxy && !sdata->current_workbase)) {
 		cksleep_ms(100);
 		if (!(++delays % 50))
-			LOGWARNING("%d Second delay waiting for bitcoind at startup", delays / 10);
+			LOGWARNING("%d Second delay waiting for digibyted at startup", delays / 10);
 	}
 	parse_method(ckp, sdata, client, client_id, id_val, method, params);
 }
@@ -8996,7 +8996,7 @@ void *stratifier(void *arg)
 
 	if (!ckp->proxy) {
 		if (!generator_checkaddr(ckp, ckp->btcaddress, &ckp->script, &ckp->segwit)) {
-			LOGEMERG("Fatal: btcaddress invalid according to bitcoind");
+			LOGEMERG("Fatal: dgbaddress invalid according to digibyted");
 			goto out;
 		}
 
@@ -9008,17 +9008,17 @@ void *stratifier(void *arg)
 		if (generator_checkaddr(ckp, ckp->donaddress, &ckp->donscript, &ckp->donsegwit)) {
 			ckp->donvalid = true;
 			sdata->dontxnlen = address_to_txn(sdata->dontxnbin, ckp->donaddress, ckp->donscript, ckp->donsegwit);
-			LOGNOTICE("BTC donation address valid %s", ckp->donaddress);
-		} else if (generator_checkaddr(ckp, ckp->tndonaddress, &ckp->donscript, &ckp->donsegwit)) {
-			ckp->donaddress = ckp->tndonaddress;
-			ckp->donvalid = true;
-			sdata->dontxnlen = address_to_txn(sdata->dontxnbin, ckp->donaddress, ckp->donscript, ckp->donsegwit);
-			LOGNOTICE("BTC testnet donation address valid %s", ckp->donaddress);
+			LOGNOTICE("DGB donation address valid %s", ckp->donaddress);
 		} else if (generator_checkaddr(ckp, ckp->rtdonaddress, &ckp->donscript, &ckp->donsegwit)) {
 			ckp->donaddress = ckp->rtdonaddress;
 			ckp->donvalid = true;
 			sdata->dontxnlen = address_to_txn(sdata->dontxnbin, ckp->donaddress, ckp->donscript, ckp->donsegwit);
-			LOGNOTICE("BTC regtest donation address valid %s", ckp->donaddress);
+			LOGNOTICE("DGB regtest donation address valid %s", ckp->donaddress);
+		} else if (generator_checkaddr(ckp, ckp->tndonaddress, &ckp->donscript, &ckp->donsegwit)) {
+			ckp->donaddress = ckp->tndonaddress;
+			ckp->donvalid = true;
+			sdata->dontxnlen = address_to_txn(sdata->dontxnbin, ckp->donaddress, ckp->donscript, ckp->donsegwit);
+			LOGNOTICE("DGB testnet donation address valid %s", ckp->donaddress);
 		} else
 			LOGNOTICE("No valid donation address found");
 	}

@@ -29,8 +29,8 @@ static bool check_required_rule(const char* rule)
 	return false;
 }
 
-/* Take a bitcoin address and do some sanity checks on it, then send it to
- * bitcoind to see if it's a valid address */
+/* Take a DGB address and do some sanity checks on it, then send it to
+ * digibyted to see if it's a valid address */
 bool validate_address(connsock_t *cs, const char *address, bool *script, bool *segwit)
 {
 	json_t *val, *res_val, *valid_val, *tmp_val;
@@ -61,21 +61,28 @@ bool validate_address(connsock_t *cs, const char *address, bool *script, bool *s
 		goto out;
 	}
 	if (!json_is_true(valid_val)) {
-		LOGDEBUG("Bitcoin address %s is NOT valid", address);
+		LOGDEBUG("DGB address %s is NOT valid", address);
 		goto out;
 	}
 	ret = true;
 	tmp_val = json_object_get(res_val, "isscript");
 	if (unlikely(!tmp_val)) {
-		/* All recent bitcoinds with wallet support built in should
+		/* All recent DGB Core builds with wallet support should
 		 * support this, if not, look for addresses the braindead way
 		 * to tell if it's a script address. */
-		LOGDEBUG("No isscript support from bitcoind");
-		if (address[0] == '3' || address[0] == '2')
+		LOGDEBUG("No isscript support from digibyted");
+		if (address[0] == 'S' || address[0] == '3' || address[0] == '2')
 			*script = true;
 		/* Now look to see this isn't a bech32: We can't support
-		 * bech32 without knowing if it's a pubkey or a script */
-		else if (address[0] != '1' && address[0] != 'm')
+		 * bech32 without knowing if it's a pubkey or a script.
+		 * Support: D (P2PKH mainnet), S/3/2 (P2SH), m/n/s (P2PKH testnet/regtest),
+		 * dgb1/dgbt1/dgbrt1 (bech32). Note: lowercase 's' is P2PKH on
+		 * DGB testnet/regtest (version byte 0x7E). */
+		else if (address[0] != 'D' && address[0] != 'm' && address[0] != 'n' &&
+			 address[0] != 's' &&
+			 strncasecmp(address, "dgb1", 4) &&
+			 strncasecmp(address, "dgbt1", 5) &&
+			 strncasecmp(address, "dgbrt1", 6))
 			ret = false;
 		goto out;
 	}
@@ -84,7 +91,7 @@ bool validate_address(connsock_t *cs, const char *address, bool *script, bool *s
 	if (unlikely(!tmp_val))
 		goto out;
 	*segwit = json_is_true(tmp_val);
-	LOGDEBUG("Bitcoin address %s IS valid%s%s", address, *script ? " script" : "",
+	LOGDEBUG("DGB address %s IS valid%s%s", address, *script ? " script" : "",
 		 *segwit ? " segwit" : "");
 out:
 	if (val)
@@ -113,9 +120,12 @@ out:
 	return val;
 }
 
-static const char *gbt_req = "{\"method\": \"getblocktemplate\", \"params\": [{\"capabilities\": [\"coinbasetxn\", \"workid\", \"coinbase/append\"], \"rules\" : [\"segwit\"]}]}\n";
+/* DGB MultiAlgo: algo must be specified as "algo" key inside the request object.
+ * Using it as a second params element is rejected by DGB nodes. We must explicitly
+ * request sha256d templates. This applies to mainnet, testnet, and regtest. */
+static const char *gbt_req_sha256d = "{\"method\": \"getblocktemplate\", \"params\": [{\"capabilities\": [\"coinbasetxn\", \"workid\", \"coinbase/append\"], \"rules\" : [\"segwit\"], \"algo\": \"sha256d\"}]}\n";
 
-/* Request getblocktemplate from bitcoind already connected with a connsock_t
+/* Request getblocktemplate from digibyted already connected with a connsock_t
  * and then summarise the information to the most efficient set of data
  * required to assemble a mining template, storing it in a gbtbase_t structure */
 bool gen_gbtbase(connsock_t *cs, gbtbase_t *gbt)
@@ -133,8 +143,7 @@ bool gen_gbtbase(connsock_t *cs, gbtbase_t *gbt)
 	int height;
 	int i;
 	bool ret = false;
-
-	val = json_rpc_call(cs, gbt_req);
+	val = json_rpc_call(cs, gbt_req_sha256d);
 	if (!val) {
 		LOGWARNING("%s:%s Failed to get valid json response to getblocktemplate", cs->url, cs->port);
 		return ret;
@@ -227,7 +236,7 @@ void clear_gbtbase(gbtbase_t *gbt)
 
 static const char *blockcount_req = "{\"method\": \"getblockcount\"}\n";
 
-/* Request getblockcount from bitcoind, returning the count or -1 if the call
+/* Request getblockcount from digibyted, returning the count or -1 if the call
  * fails. */
 int get_blockcount(connsock_t *cs)
 {
@@ -250,7 +259,7 @@ out:
 	return ret;
 }
 
-/* Request getblockhash from bitcoind for height, writing the value into *hash
+/* Request getblockhash from digibyted for height, writing the value into *hash
  * which should be at least 65 bytes long since the hash is 64 chars. */
 bool get_blockhash(connsock_t *cs, int height, char *hash)
 {
@@ -284,7 +293,7 @@ out:
 
 static const char *bestblockhash_req = "{\"method\": \"getbestblockhash\"}\n";
 
-/* Request getbestblockhash from bitcoind. bitcoind 0.9+ only */
+/* Request getbestblockhash from digibyted. */
 bool get_bestblockhash(connsock_t *cs, char *hash)
 {
 	json_t *val, *res_val;
@@ -315,9 +324,9 @@ out:
 
 bool submit_block(connsock_t *cs, const char *params)
 {
-	json_t *val, *res_val;
+	json_t *val, *res_val, *err_val;
 	int len, retries = 0;
-	const char *res_ret;
+	const char *res_ret, *err_ret;
 	bool ret = false;
 	char *rpc_req;
 
@@ -332,6 +341,12 @@ retry:
 		if (++retries < 5)
 			goto retry;
 		return ret;
+	}
+	/* Debug: log full JSON response at debug level (-l 7) */
+	char *json_str = json_dumps(val, JSON_COMPACT);
+	if (json_str) {
+		LOGDEBUG("submitblock full response: %s", json_str);
+		free(json_str);
 	}
 	res_val = json_object_get(val, "result");
 	if (!res_val) {
@@ -353,6 +368,13 @@ retry:
 			LOGWARNING("SUBMIT BLOCK GOT NO RESPONSE!");
 			goto out;
 		}
+	}
+	/* Log error field if present */
+	err_val = json_object_get(val, "error");
+	if (err_val && !json_is_null(err_val)) {
+		err_ret = json_string_value(json_object_get(err_val, "message"));
+		if (err_ret && strlen(err_ret))
+			LOGWARNING("Submit block error: %s", err_ret);
 	}
 	LOGWARNING("BLOCK ACCEPTED!");
 	ret = true;
