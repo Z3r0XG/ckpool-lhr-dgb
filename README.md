@@ -1,6 +1,6 @@
 # ckpool-lhr-dgb
 
-A fork of CKPool-LHR adding DigiByte (DGB) SHA256d solo mining support,
+A fork of ckpool-lhr adding DigiByte (DGB) SHA256d solo mining support,
 with sub-"1" difficulty for low hash rate miners and additional enhancements.
 
 Ultra low overhead, scalable, multi-process, multi-threaded DigiByte mining
