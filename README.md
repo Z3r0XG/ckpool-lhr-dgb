@@ -6,15 +6,6 @@ with sub-"1" difficulty for low hash rate miners and additional enhancements.
 Ultra low overhead, scalable, multi-process, multi-threaded DigiByte mining
 pool software in C for Linux.
 
-## Supported DigiByte Core
-
-Developed and tested against **DigiByte Core v9.26.4**. This software relies on
-v9 node behaviour — notably requesting `sha256d` as the second positional
-`getblocktemplate` argument, and DigiDollar version-bit 23 handling. A DigiByte
-Core major-version upgrade may change this interface and must be reconfirmed
-before use. As a safeguard, the pool checks the node's `pow_algo` at connect time
-and refuses to run against a node that does not serve sha256d templates.
-
 ## Key Features
 
 - Sub-"1" difficulty support for low hash rate miners
@@ -185,7 +176,7 @@ Reward sent directly to miner's address.
 
 ## Quick Start
 
-> This software requires a DigiByte node running with SHA256d. Tested with [DigiByte Core](https://github.com/digibyte-core/digibyte) v9.26.4 (see "Supported DigiByte Core" above).
+> This software requires a DigiByte Core v9.26.4 node running with SHA256d.
 
 #### 1. Configure DigiByte Daemon
 
