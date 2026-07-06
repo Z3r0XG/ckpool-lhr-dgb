@@ -213,6 +213,7 @@ typedef struct generator_data gdata_t;
 static bool server_alive(ckpool_t *ckp, server_instance_t *si, bool pinging)
 {
 	char *userpass = NULL;
+	const char *pow_algo;
 	bool ret = false;
 	connsock_t *cs;
 	gbtbase_t gbt;
@@ -256,6 +257,15 @@ static bool server_alive(ckpool_t *ckp, server_instance_t *si, bool pinging)
 			LOGINFO("Failed to get test block template from %s:%s!",
 				cs->url, cs->port);
 		}
+		goto out;
+	}
+	/* DigiByte's getblocktemplate always includes pow_algo. Refuse a node that
+	 * serves the wrong (or no) algo rather than mine sha256d on a wrong target. */
+	pow_algo = json_string_value(json_object_get(gbt.json, "pow_algo"));
+	if (!pow_algo || safecmp(pow_algo, "sha256d")) {
+		LOGWARNING("Node %s:%s served pow_algo '%s', require sha256d; refusing node",
+			   cs->url, cs->port, pow_algo ? pow_algo : "(missing)");
+		clear_gbtbase(&gbt);
 		goto out;
 	}
 	clear_gbtbase(&gbt);
