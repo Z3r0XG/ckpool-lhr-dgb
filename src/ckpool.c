@@ -1465,7 +1465,7 @@ static void parse_config(ckpool_t *ckp)
 {
 	json_t *json_conf, *arr_val;
 	json_error_t err_val;
-	char *url, *vmask, *user_agent;
+	char *url, *user_agent;
 	int arr_size;
 
 	json_conf = json_load_file(ckp->config, JSON_DISABLE_EOF_CHECK, &err_val);
@@ -1497,11 +1497,19 @@ static void parse_config(ckpool_t *ckp)
 		LOGWARNING("Invalid negative value for max_pool_useragents (%d), setting to 0", ckp->max_pool_useragents);
 		ckp->max_pool_useragents = 0;
 	}
-	json_get_string(&vmask, json_conf, "version_mask");
-	if (vmask && strlen(vmask) && validhex(vmask))
-		sscanf(vmask, "%x", &ckp->version_mask);
-	else
-		ckp->version_mask = 0x1fffe000; /* DGB algo in bits 9-11 (0xe00); mask avoids them */
+	/* version_rolling (ASICBoost): on (default) advertises the full BIP320 mask
+	 * 0x1fffe000; off disables rolling. Only on/off are exposed -- an arbitrary
+	 * mask could hit DGB's algo bits (8-11) or the DigiDollar signal (bit 23). */
+	ckp->version_mask = 0x1fffe000;
+	arr_val = json_object_get(json_conf, "version_rolling");
+	if (arr_val) {
+		if (json_is_boolean(arr_val))
+			ckp->version_mask = json_is_true(arr_val) ? 0x1fffe000 : 0;
+		else
+			LOGWARNING("Invalid version_rolling setting, ignoring");
+	}
+	if (json_object_get(json_conf, "version_mask"))
+		LOGWARNING("Ignoring unknown setting version_mask");
 	/* Default don't drop idle clients */
 	json_get_int(&ckp->dropidle, json_conf, "dropidle");
 	/* Look for an array first and then a single entry */

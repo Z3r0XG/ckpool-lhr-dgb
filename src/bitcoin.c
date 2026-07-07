@@ -120,10 +120,9 @@ out:
 	return val;
 }
 
-/* DGB MultiAlgo: algo must be specified as "algo" key inside the request object.
- * Using it as a second params element is rejected by DGB nodes. We must explicitly
- * request sha256d templates. This applies to mainnet, testnet, and regtest. */
-static const char *gbt_req_sha256d = "{\"method\": \"getblocktemplate\", \"params\": [{\"capabilities\": [\"coinbasetxn\", \"workid\", \"coinbase/append\"], \"rules\" : [\"segwit\"], \"algo\": \"sha256d\"}]}\n";
+/* DGB MultiAlgo: the algorithm is the 2nd positional param to getblocktemplate.
+ * An "algo" key inside the request object is ignored and defaults to scrypt. */
+static const char *gbt_req_sha256d = "{\"method\": \"getblocktemplate\", \"params\": [{\"capabilities\": [\"coinbasetxn\", \"workid\", \"coinbase/append\"], \"rules\" : [\"segwit\"]}, \"sha256d\"]}\n";
 
 /* Request getblocktemplate from digibyted already connected with a connsock_t
  * and then summarise the information to the most efficient set of data

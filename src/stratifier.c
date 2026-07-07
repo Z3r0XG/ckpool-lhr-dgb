@@ -377,6 +377,22 @@ static void info_msg_entries(char_entry_t **entries)
 
 static const int witnessdata_size = 36; // commitment header + hash
 
+/* Clear the version-rolling region (version_mask) from the base block version we
+ * hash and advertise, so the miner owns those bits and base | rolled is a correct
+ * masked merge. DigiDollar signals on bit 23, which sits inside the default mask;
+ * leaving it set would make rolled shares reconstruct to a different header. */
+static void strip_version_rolling_bits(const ckpool_t *ckp, workbase_t *wb)
+{
+	uint32_t version = 0;
+
+	if (!ckp->version_mask)
+		return;
+	sscanf(wb->bbversion, "%x", &version);
+	version &= ~ckp->version_mask;
+	wb->version = version;
+	sprintf(wb->bbversion, "%08x", version);
+}
+
 static void generate_coinbase(ckpool_t *ckp, workbase_t *wb)
 {
 	uint64_t *u64, g64, d64 = 0;
@@ -384,6 +400,10 @@ static void generate_coinbase(ckpool_t *ckp, workbase_t *wb)
 	char header[272];
 	int len, ofs = 0;
 	ts_t now;
+
+	/* Reserve the version-rolling region for the miner before we build the
+	 * header we hash and the job we advertise (DigiDollar bit 23 vs ASICBoost). */
+	strip_version_rolling_bits(ckp, wb);
 
 	/* Set fixed length coinb1 arrays to be more than enough */
 	wb->coinb1 = ckzalloc(256);
@@ -1734,6 +1754,9 @@ static void add_node_base(ckpool_t *ckp, json_t *val, bool trusted, int64_t clie
 	json_intcpy(&wb->enonce2varlen, val, "enonce2varlen");
 	ts_realtime(&wb->gentime);
 
+	/* Reserve the version-rolling region for the miner (DigiDollar bit 23). */
+	strip_version_rolling_bits(ckp, wb);
+
 	snprintf(header, 270, "%s%s%s%s%s%s%s",
 		 wb->bbversion, wb->prevhash,
 		 "0000000000000000000000000000000000000000000000000000000000000000",
@@ -2935,6 +2958,8 @@ static void update_notify(ckpool_t *ckp, const char *cmd)
 	sscanf(wb->ntime, "%x", &wb->ntime32);
 	clean = json_is_true(json_object_get(val, "clean"));
 	ts_realtime(&wb->gentime);
+	/* Reserve the version-rolling region for the miner (DigiDollar bit 23). */
+	strip_version_rolling_bits(ckp, wb);
 	snprintf(header, 270, "%s%s%s%s%s%s%s",
 		 wb->bbversion, wb->prevhash,
 		 "0000000000000000000000000000000000000000000000000000000000000000",
@@ -6975,10 +7000,14 @@ static void parse_method(ckpool_t *ckp, sdata_t *sdata, stratum_instance_t *clie
 
 		LOGINFO("Mining configure requested from %s %s", client->identity,
 			client->address);
-		sprintf(version_str, "%08x", ckp->version_mask);
 		val = json_object();
-		JSON_CPACK(result_val, "{sbss}", "version-rolling", json_true(),
-			   "version-rolling.mask", version_str);
+		if (ckp->version_mask) {
+			sprintf(version_str, "%08x", ckp->version_mask);
+			JSON_CPACK(result_val, "{sbss}", "version-rolling", json_true(),
+				   "version-rolling.mask", version_str);
+		} else {
+			JSON_CPACK(result_val, "{sb}", "version-rolling", json_false());
+		}
 		json_object_set_new_nocheck(val, "result", result_val);
 		json_object_set_nocheck(val, "id", id_val);
 		json_object_set_new_nocheck(val, "error", json_null());
