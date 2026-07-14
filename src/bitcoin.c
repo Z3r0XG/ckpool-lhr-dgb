@@ -67,29 +67,18 @@ bool validate_address(connsock_t *cs, const char *address, bool *script, bool *s
 	ret = true;
 	tmp_val = json_object_get(res_val, "isscript");
 	if (unlikely(!tmp_val)) {
-		/* All recent DGB Core builds with wallet support should
-		 * support this, if not, look for addresses the braindead way
-		 * to tell if it's a script address. */
-		LOGDEBUG("No isscript support from digibyted");
-		if (address[0] == 'S' || address[0] == '3' || address[0] == '2')
-			*script = true;
-		/* Now look to see this isn't a bech32: We can't support
-		 * bech32 without knowing if it's a pubkey or a script.
-		 * Support: D (P2PKH mainnet), S/3/2 (P2SH), m/n/s (P2PKH testnet/regtest),
-		 * dgb1/dgbt1/dgbrt1 (bech32). Note: lowercase 's' is P2PKH on
-		 * DGB testnet/regtest (version byte 0x7E). */
-		else if (address[0] != 'D' && address[0] != 'm' && address[0] != 'n' &&
-			 address[0] != 's' &&
-			 strncasecmp(address, "dgb1", 4) &&
-			 strncasecmp(address, "dgbt1", 5) &&
-			 strncasecmp(address, "dgbrt1", 6))
-			ret = false;
+		/* Refuse an address the node does not report isscript for. */
+		LOGDEBUG("Refusing %s: unsupported address type", address);
+		ret = false;
 		goto out;
 	}
 	*script = json_is_true(tmp_val);
 	tmp_val = json_object_get(res_val, "iswitness");
-	if (unlikely(!tmp_val))
+	if (unlikely(!tmp_val)) {
+		LOGERR("Failed to get iswitness json response to validate_address");
+		ret = false;
 		goto out;
+	}
 	*segwit = json_is_true(tmp_val);
 	LOGDEBUG("DGB address %s IS valid%s%s", address, *script ? " script" : "",
 		 *segwit ? " segwit" : "");
